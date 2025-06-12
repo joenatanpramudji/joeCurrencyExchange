@@ -15,35 +15,32 @@ import java.util.Map;
 @RequestMapping("/api")
 public class CurrencyController {
 
-    private final ExchangeRateService exchangeRateService;
+    private final ExchangeRateService svc;
 
-    public CurrencyController(ExchangeRateService exchangeRateService) {
-        this.exchangeRateService = exchangeRateService;
+    public CurrencyController(ExchangeRateService svc) {
+        this.svc = svc;
     }
 
-    /**
-     * Example: GET /api/convert?from=USD&to=EUR&amount=100
-     */
     @GetMapping("/convert")
-    public ResponseEntity<Map<String, Object>> convert(
-            @RequestParam("from") String base,
-            @RequestParam("to") String target,
-            @RequestParam("amount") BigDecimal amount
+    public ResponseEntity<Map<String,Object>> convert(
+            @RequestParam String from,
+            @RequestParam String to,
+            @RequestParam BigDecimal amount
     ) {
-        // Validate currency codes: You might enforce uppercase, length 3, etc.
-        base = base.toUpperCase();
-        target = target.toUpperCase();
+        from = from.toUpperCase();
+        to   = to.toUpperCase();
 
-        BigDecimal rate = exchangeRateService.getRate(base, target);
-        BigDecimal converted = exchangeRateService.convertAmount(base, target, amount);
+        // derive the unit rate, then the converted amount
+        BigDecimal rate      = svc.getDerivedRate(from, to);
+        BigDecimal converted = svc.convertAmount(from, to, amount);
 
-        Map<String, Object> response = new HashMap<>();
-        response.put("base", base);
-        response.put("target", target);
-        response.put("amount", amount);
-        response.put("rate", rate);
-        response.put("converted", converted);
-
-        return ResponseEntity.ok(response);
+        Map<String,Object> resp = Map.of(
+                "base",      from,
+                "target",    to,
+                "amount",    amount,
+                "rate",      rate,
+                "converted", converted
+        );
+        return ResponseEntity.ok(resp);
     }
 }

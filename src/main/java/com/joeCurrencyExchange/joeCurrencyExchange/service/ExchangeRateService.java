@@ -12,6 +12,7 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.Map;
 
@@ -29,6 +30,8 @@ public class ExchangeRateService {
     /** your CurrencyLayer access key */
     @Value("${exchange.api.key}")
     private String apiKey;
+
+    private static final String STORAGE_BASE = "USD";
 
     public ExchangeRateService(RestTemplate restTemplate,
                                ExchangeRateRepository repository) {
@@ -96,13 +99,52 @@ public class ExchangeRateService {
     }
 
     /**
-     * Convert amount using stored rate.
+     * Converts any from→to pair by using USD as intermediary.
      */
     @Transactional(readOnly = true)
-    public BigDecimal convertAmount(String baseCurrency,
-                                    String targetCurrency,
+    public BigDecimal convertAmount(String fromCurrency,
+                                    String toCurrency,
                                     BigDecimal amount) {
-        BigDecimal rate = getRate(baseCurrency, targetCurrency);
-        return amount.multiply(rate);
+        fromCurrency = fromCurrency.toUpperCase();
+        toCurrency   = toCurrency.toUpperCase();
+
+        // 1) if from=USD: just multiply
+        if (STORAGE_BASE.equals(fromCurrency)) {
+            BigDecimal usdToTarget = getDirectRate(toCurrency);
+            return amount.multiply(usdToTarget);
+        }
+
+        // 2) if to=USD: invert
+        if (STORAGE_BASE.equals(toCurrency)) {
+            BigDecimal usdToFrom = getDirectRate(fromCurrency);
+            return amount.divide(usdToFrom, 8, RoundingMode.HALF_UP);
+        }
+
+        // 3) cross A→B = (A→USD) × (USD→B)
+        BigDecimal usdToFrom   = getDirectRate(fromCurrency);
+        BigDecimal usdToTarget = getDirectRate(toCurrency);
+
+        // amount in USD = amount ÷ (USD→A)
+        BigDecimal inUsd = amount.divide(usdToFrom, 8, RoundingMode.HALF_UP);
+        // USD → B
+        return inUsd.multiply(usdToTarget);
+    }
+
+    @Transactional(readOnly = true)
+    public BigDecimal getDirectRate(String targetCurrency) {
+        return repository
+                .findByBaseCurrencyAndTargetCurrency(STORAGE_BASE, targetCurrency)
+                .map(ExchangeRate::getRate)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "No direct USD→" + targetCurrency + " rate stored"
+                ));
+    }
+
+    /**
+     * Derives the rate from→to (A→B) as: rate = convertAmount(A, B, 1.0).
+     */
+    @Transactional(readOnly = true)
+    public BigDecimal getDerivedRate(String fromCurrency, String toCurrency) {
+        return convertAmount(fromCurrency, toCurrency, BigDecimal.ONE);
     }
 }
